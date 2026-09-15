@@ -1,0 +1,6 @@
+aiortc
+websockets
+cryptography
+opencv-python
+ultralytics
+numpy

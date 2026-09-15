@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+cert.pem
+key.pem
+.selftest_cert.pem
+.selftest_key.pem
+frames/
+*.pt
+receiver.log
+.nojekyll

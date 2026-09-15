@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eagle Eye — AR pose stream</title>
+<style>
+  body { background:#0C1214; color:#C9D6D9; font-family:sans-serif;
+         display:flex; flex-direction:column; align-items:center;
+         justify-content:center; min-height:100vh; margin:0; gap:12px }
+  button { background:#FFB020; border:0; padding:14px 28px; font-size:18px;
+           border-radius:6px; font-weight:bold; margin:4px }
+  button.alt { background:#223236; color:#C9D6D9 }
+  #status { color:#6E8288; font-size:14px; max-width:34ch; text-align:center }
+  #pose { font-family:monospace; color:#FFB020; font-size:13px; white-space:pre }
+</style>
+</head>
+<body>
+<h2>Eagle Eye AR node</h2>
+<button id="goPose">Enter AR — pose only</button>
+<button id="goCam">Enter AR — camera + pose</button>
+<p id="status">Checking AR support…</p>
+<pre id="pose"></pre>
+
+<script>
+const SERVER = `wss://${location.hostname}:8443/ws`;
+const NAME   = new URLSearchParams(location.search).get("name") || "cam1";
+
+const statusEl = document.getElementById("status");
+const poseEl   = document.getElementById("pose");
+let ws = null, mode = "pose-only", frameCount = 0, lastSend = 0, sentCount = 0;
+let clockOffset = null, rtt = null;
+
+function connect() {
+  ws = new WebSocket(SERVER);
+  ws.onopen  = () => { statusEl.textContent = `linked as ${NAME}`; syncClock(); };
+  ws.onclose = (e) => { statusEl.textContent = `link lost (code ${e.code}) retrying…`; setTimeout(connect, 1500); };
+  ws.onerror = () => {};
+}
+connect();
+
+// ---- clock sync: lets the PC compute true one-way latency ----
+// all units SECONDS on the wire (off, rtt); performance.now() is ms internally
+async function syncClock() {
+  try {
+    const x = performance.now();
+    const r = await fetch(`/time?x=${x}`);
+    const data = await r.json();
+    const rttS = (performance.now() - x) / 1000;
+    clockOffset = data.t + rttS / 2 - (x + rttS * 500) / 1000;
+    rtt = rttS;
+    if (ws && ws.readyState === 1)
+      ws.send(JSON.stringify({ type: "sync", name: NAME, off: clockOffset, rtt: rttS }));
+  } catch (e) { /* retry on next open */ }
+}
+setInterval(() => { if (ws && ws.readyState === 1) syncClock(); }, 15000);
+
+// heartbeat so we can see traffic even before AR starts
+setInterval(() => {
+  if (ws && ws.readyState === 1) { ws.send(JSON.stringify({type:"hb", name:NAME})); sentCount++; }
+}, 2000);
+
+function sendPose(pose, t) {
+  if (!ws || ws.readyState !== 1 || !pose) return;
+  try {
+    const view = pose.views[0];
+    const p = view.transform.position;
+    const q = view.transform.orientation;
+    ws.send(JSON.stringify({ type:"pose", name:NAME, t, c: performance.now(),
+      x:+p.x.toFixed(3), y:+p.y.toFixed(3), z:+p.z.toFixed(3),
+      qx:q.x, qy:q.y, qz:q.z, qw:q.w }));
+    sentCount++;
+  } catch (e) { statusEl.textContent = "sendPose error: " + e.message; }
+}
+
+async function sendCameraImage(binding, view) {
+  if (!view.camera || !binding) return;          // camera-access not granted
+  const now = performance.now();
+  if (now - lastSend < 100) return;              // ~10 FPS cap
+  lastSend = now;
+  try {
+    const frame = binding.getCameraImage(view.camera);
+    if (!frame) return;
+    const bmp = await createImageBitmap(frame);
+    const c = document.createElement("canvas");
+    c.width = 320; c.height = Math.round(320 * bmp.height / bmp.width);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    ws.send(JSON.stringify({ type:"frame", name:NAME, n:++frameCount, c: performance.now(),
+                             jpeg: c.toDataURL("image/jpeg", 0.5) }));
+  } catch (e) { /* frame not ready this tick */ }
+}
+
+document.getElementById("goPose").onclick = () => startAR(false);
+document.getElementById("goCam").onclick  = () => startAR(true);
+
+async function startAR(withCamera) {
+  if (!navigator.xr) { statusEl.textContent = "WebXR missing — open in Chrome on Android via HTTPS."; return; }
+  let ok = false;
+  try { ok = await navigator.xr.isSessionSupported("immersive-ar"); }
+  catch (e) { statusEl.textContent = "isSessionSupported failed: " + e.message; return; }
+  if (!ok) { statusEl.textContent = "This device/browser cannot run immersive-ar sessions."; return; }
+
+  const session = await navigator.xr.requestSession("immersive-ar", {
+    requiredFeatures: ["local-floor"],
+    optionalFeatures: withCamera ? ["camera-access"] : []
+  });
+  const gl = document.createElement("canvas").getContext("webgl2", { xrCompatible: true });
+  await gl.makeXRCompatible();
+
+  // CRITICAL: without a baseLayer, getViewerPose() stays null forever.
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  const binding = new XRWebGLBinding(session, gl);
+  const camGranted = session.enabledFeatures && session.enabledFeatures.includes("camera-access");
+  mode = camGranted ? "camera+pose" : "pose-only";
+  statusEl.textContent = "AR running — streaming " + mode;
+
+  // reference space fallback chain: floor -> local -> viewer (never fails)
+  let refSpace, refName;
+  for (const name of ["local-floor", "local", "viewer"]) {
+    try { refSpace = await session.requestReferenceSpace(name); refName = name; break; }
+    catch (e) { /* try next */ }
+  }
+  if (!refSpace) { statusEl.textContent = "no reference space available"; return; }
+
+  session.requestAnimationFrame(function loop(t, frame) {
+    try {
+      const pose = frame.getViewerPose(refSpace);
+      poseEl.textContent = `${mode} (${refName})\nsent: ${sentCount}  frames: ${frameCount}  pose: ${pose ? "yes" : "NO"}`;
+      if (pose) {
+        sendPose(pose, t);
+        if (camGranted) for (const view of pose.views) sendCameraImage(binding, view);
+      }
+      session.requestAnimationFrame(loop);
+    } catch (e) {
+      statusEl.textContent = "AR loop error: " + e.message;
+    }
+  });
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eagle Eye — viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0C1214;
+    --surface: #10191B;
+    --line: #223236;
+    --text: #C9D6D9;
+    --muted: #6E8288;
+    --amber: #FFB020;
+    --amber-dim: rgba(255, 176, 32, 0.14);
+    --radius: 3px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "IBM Plex Sans", sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    min-height: 100vh;
+  }
+
+  .data {
+    font-family: "Chakra Petch", sans-serif;
+  }
+
+  /* ---------- header ---------- */
+
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .brand svg { display: block; }
+
+  .wordmark {
+    font-family: "Chakra Petch", sans-serif;
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: 0.02em;
+  }
+
+  .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .linkstate {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 13.5px;
+    color: var(--muted);
+  }
+
+  .linkstate .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 6px rgba(255, 176, 32, 0.5);
+  }
+
+  .clock {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 14px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- layout ---------- */
+
+  .page {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 24px;
+    max-width: 1380px;
+    margin: 0 auto;
+    padding: 24px 28px 40px;
+    align-items: start;
+  }
+
+  /* ---------- camera wall ---------- */
+
+  .wall {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 14px;
+  }
+
+  .tile {
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    transition: border-color 0.25s ease;
+  }
+
+  .tile.area-a { grid-column: 1 / 2; grid-row: 1 / 3; }
+  .tile.area-b { grid-column: 2 / 3; grid-row: 1 / 2; }
+  .tile.area-c { grid-column: 2 / 3; grid-row: 2 / 3; }
+
+  .tile:hover { border-color: #3A4E54; }
+
+  .tile:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+  }
+
+  .tile.focused { border-color: rgba(255, 176, 32, 0.55); }
+
+  .view {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    background: #0A0F11;
+  }
+
+  .tile.area-a .view { aspect-ratio: auto; height: 100%; min-height: 420px; }
+
+  .view canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .tile.connecting .view::after {
+    content: "linking";
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 13px;
+    color: var(--muted);
+    background: #0A0F11;
+  }
+
+  .standby {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  .chip {
+    display: inline-block;
+}
+
+  .tile.standby .standby { display: flex; }
+
+  .live-dot { position:absolute; top:10px; right:10px; width:8px; height:8px; border-radius:50%; background:#2a3b40; }
+  .live-dot.on { background:#FFB020; box-shadow:0 0 6px rgba(255,176,32,.6); }
+
+  .track-overlay { position:absolute; inset:0; pointer-events:none; }
+  .track-x { position:absolute; transform:translate(-50%,-50%); }
+  .track-x .x { width:14px; height:14px; border:2px solid #FF3B30; }
+  .track-x .x::before, .track-x .x::after { content:""; position:absolute; background:#FF3B3B; }
+  .track-x .x::before { top:4px; left:0; right:0; height:2px; }
+  .track-x .x::after  { left:4px; top:0; bottom:0; width:2px; }
+  .track-x .lbl { position:absolute; top:-2px; left:10px; font-family:'Chakra Petch',monospace; font-size:12px; color:#FFB020; font-variant-numeric:tabular-nums; }
+
+  .world-bar { position:absolute; left:0; right:0; bottom:0; font-family:'Chakra Petch',monospace; font-size:12px; color:#6E8288; padding:6px 10px; background:rgba(10,15,17,.7); border-top:1px solid #223236; display:flex; gap:14px; align-items:center; }
+  .world-bar .net { color:#C9D6D9; }
+  .world-bar .net.bad { color:#ff5a5a; }
+
+  .standby .glyph {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+
+  .standby .name {
+    font-family: "Chakra Petch", sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .standby p {
+    font-size: 13px;
+    color: var(--muted);
+    max-width: 24ch;
+    line-height: 1.5;
+  }
+
+  .caption {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .cam-id {
+    font-family: "Chakra Petch", sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .cam-role { color: var(--muted); font-size: 13px; }
+
+  .chips {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+  }
+
+  .chip {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 12px;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chip.live {
+    color: var(--amber);
+    border-color: rgba(255, 176, 32, 0.4);
+    background: var(--amber-dim);
+  }
+
+  /* ---------- side rail ---------- */
+
+  .side {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    min-width: 0;
+  }
+
+  .side h2 {
+    font-family: "Chakra Petch", sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .entities { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+
+  .entity {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .entity .who {
+    font-family: "Chakra Petch", sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .entity .conf {
+    margin-left: auto;
+    font-family: "Chakra Petch", sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--amber);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .entity .where {
+    flex-basis: 100%;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .entity { flex-wrap: wrap; }
+
+  .events { list-style: none; display: flex; flex-direction: column; }
+
+  .event {
+    display: flex;
+    gap: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(34, 50, 54, 0.55);
+    font-size: 13px;
+  }
+
+  .event time {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+
+  .event p { color: var(--text); min-width: 0; }
+
+  .events li:first-child .event p { color: var(--amber); }
+
+  /* ---------- responsive ---------- */
+
+  @media (max-width: 980px) {
+    .page { grid-template-columns: 1fr; }
+    .wall { grid-template-columns: 1fr; grid-template-rows: none; }
+    .tile.area-a { grid-column: 1; grid-row: auto; }
+    .tile.area-b, .tile.area-c { grid-column: 1; grid-row: auto; }
+    .tile.area-a .view { aspect-ratio: 16 / 10; height: auto; min-height: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M2 6V2h4M14 2h4v4M18 14v4h-4M6 18H2v-4" stroke="#C9D6D9" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="10" cy="10" r="2.4" stroke="#FFB020" stroke-width="1.6"/>
+    </svg>
+    <span class="wordmark">Eagle Eye</span>
+  </div>
+  <div class="status">
+    <span class="linkstate"><span class="dot" aria-hidden="true"></span><span id="linktext">live</span></span>
+    <span class="clock" id="clock">00:00:00</span>
+    <span class="world-bar" data-net="slot"><span class="net">—</span></span>
+  </div>
+</header>
+
+<main class="page">
+  <section class="wall" aria-label="Camera wall">
+    <button class="tile area-a connecting" data-cam="01">
+      <span class="view">
+        <canvas data-feed="1"></canvas>
+        <canvas class="track-overlay" data-overlay="1"></canvas>
+        <span class="live-dot" data-live="1"></span>
+      </span>
+      <span class="caption">
+        <span class="cam-id">CAM 01</span>
+        <span class="cam-role">rear</span>
+        <span class="chips">
+          <span class="chip live">25.6 FPS</span>
+          <span class="chip">24 ms</span>
+        </span>
+      </span>
+    </button>
+
+    <button class="tile area-b connecting" data-cam="02">
+      <span class="view">
+        <canvas data-feed="2"></canvas>
+        <canvas class="track-overlay" data-overlay="2"></canvas>
+        <span class="live-dot" data-live="2"></span>
+      </span>
+      <span class="caption">
+        <span class="cam-id">CAM 02</span>
+        <span class="cam-role">front</span>
+        <span class="chips">
+          <span class="chip live">24.1 FPS</span>
+          <span class="chip">31 ms</span>
+        </span>
+      </span>
+    </button>
+
+    <button class="tile area-c" data-cam="03">
+      <span class="view">
+        <canvas data-feed="3"></canvas>
+        <canvas class="track-overlay" data-overlay="3"></canvas>
+        <span class="live-dot" data-live="3"></span>
+        <span class="standby">
+          <svg class="glyph" width="26" height="26" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M2 6V2h4M14 2h4v4M18 14v4h-4M6 18H2v-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span class="name">CAM 03 · standby</span>
+          <p>Start the camera and its feed will appear here.</p>
+        </span>
+      </span>
+      <span class="caption">
+        <span class="cam-id">CAM 03</span>
+        <span class="cam-role">left</span>
+        <span class="chips">
+          <span class="chip" data-cell="03-stat">no signal</span>
+        </span>
+      </span>
+    </button>
+  </section>
+
+  <aside class="side">
+    <section>
+      <h2>World state</h2>
+      <ul class="entities">
+        <li class="entity">
+          <span class="who">Person 01</span>
+          <span class="conf" data-conf>0.91</span>
+          <span class="where" data-seen>tracked on CAM 01, seen just now</span>
+        </li>
+        <li class="entity">
+          <span class="who">Person 02</span>
+          <span class="conf" data-conf>0.84</span>
+          <span class="where" data-seen>tracked on CAM 02, seen 3 s ago</span>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Events</h2>
+      <ul class="events" id="events">
+      </ul>
+    </section>
+  </aside>
+</main>
+
+<script>
+(function () {  "use strict";
+
+
+  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  /* ---------- clock ---------- */
+
+  var clock = document.getElementById("clock");
+  function tickClock() {
+    var d = new Date();
+    function p(n) { return String(n).padStart(2, "0"); }
+    clock.textContent = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+  tickClock();
+  if (!reducedMotion) setInterval(tickClock, 1000);
+
+  /* ---------- event log ---------- */
+
+  var eventList = document.getElementById("events");
+  function logEvent(text) {
+    var d = new Date();
+    function p(n) { return String(n).padStart(2, "0"); }
+    var li = document.createElement("li");
+    li.className = "event";
+    var t = document.createElement("time");
+    t.textContent = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+    var msg = document.createElement("p");
+    msg.textContent = text;
+    li.appendChild(t);
+    li.appendChild(msg);
+    eventList.insertBefore(li, eventList.firstChild);
+    while (eventList.children.length > 7) eventList.removeChild(eventList.lastChild);
+  }
+
+  /* ---------- feed simulation ---------- */
+
+  function setupCanvas(canvas) {
+    var rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = Math.max(2, Math.round(rect.width * dpr));
+    canvas.height = Math.max(2, Math.round(rect.height * dpr));
+    return canvas.getContext("2d");
+  }
+
+  function drawNoise(ctx, w, h) {
+    ctx.fillStyle = "rgba(255,255,255,0.035)";
+    for (var i = 0; i < 90; i++) {
+      ctx.fillRect(Math.random() * w, Math.random() * h, dpr, dpr);
+    }
+  }
+
+  function drawPerson(ctx, x, groundY, s) {
+    ctx.fillStyle = "#26383E";
+    ctx.beginPath();
+    ctx.ellipse(x, groundY - 46 * s, 11 * s, 30 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, groundY - 84 * s, 8.5 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawReticle(ctx, x, y, w, h, label, alpha) {
+    var c = 10 * dpr, inset = 6 * dpr;
+    var L = x - inset, T = y - inset, R = x + w + inset, B = y + h + inset;
+    ctx.strokeStyle = "rgba(255,176,32," + alpha + ")";
+    ctx.lineWidth = 1.6 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(L, T + c); ctx.lineTo(L, T); ctx.lineTo(L + c, T);
+    ctx.moveTo(R - c, T); ctx.lineTo(R, T); ctx.lineTo(R, T + c);
+    ctx.moveTo(R, B - c); ctx.lineTo(R, B); ctx.lineTo(R - c, B);
+    ctx.moveTo(L + c, B); ctx.lineTo(L, B); ctx.lineTo(L, B - c);
+    ctx.stroke();
+
+    ctx.font = (11 * dpr) + "px 'Chakra Petch', sans-serif";
+    var tw = ctx.measureText(label).width;
+    var cw = ctx.canvas.width, ch = ctx.canvas.height;
+    var bx = Math.min(Math.max(4 * dpr, L), Math.max(4 * dpr, cw - tw - 18 * dpr));
+    var by = T < 26 * dpr ? Math.min(T + h + 6 * dpr, ch - 20 * dpr) : T - 22 * dpr;
+    ctx.fillStyle = "rgba(10,15,17,0.85)";
+    ctx.fillRect(bx, by, tw + 14 * dpr, 16 * dpr);
+    ctx.fillStyle = "rgba(255,176,32," + alpha + ")";
+    ctx.fillText(label, bx + 7 * dpr, by + 12 * dpr);
+  }
+
+  var feeds = {};
+
+  function initFeed(canvas, kind) {
+    var ctx = setupCanvas(canvas);
+    feeds[kind] = { canvas: canvas, ctx: ctx };
+  }
+
+  function drawScene(kind, t) {
+    var f = feeds[kind];
+    if (!f) return;
+    var ctx = f.ctx, w = f.canvas.width, h = f.canvas.height;
+
+    var g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, "#0E1619");
+    g.addColorStop(1, "#0A0F11");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    drawNoise(ctx, w, h);
+
+    var groundY = h * 0.82;
+
+    if (kind === 1) {
+      var span = w + 160 * dpr;
+      var x = ((t * 60 * dpr) % span) - 80 * dpr;
+      var s = (h / 420) * dpr;
+      drawPerson(ctx, x, groundY, s);
+      drawReticle(ctx, x - 16 * s, groundY - 98 * s, 32 * s, 100 * s, "PERSON 0.91", 0.95);
+    } else if (kind === 2) {
+      var x2 = w - ((t * 34 * dpr) % (w + 120 * dpr)) + 60 * dpr;
+      var s2 = (h / 700) * dpr;
+      drawPerson(ctx, x2, groundY, s2);
+      drawReticle(ctx, x2 - 14 * s2, groundY - 92 * s2, 28 * s2, 94 * s2, "PERSON 0.84", 0.6);
+    } else {
+      ctx.fillStyle = "rgba(110,130,136,0.08)";
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  var canvases = document.querySelectorAll("canvas[data-feed]");
+  canvases.forEach(function (c) {
+    initFeed(c, parseInt(c.dataset.feed, 10));
+  });
+
+  function redrawAll() {
+    Object.keys(feeds).forEach(function (k) {
+      setupCanvas(feeds[k].canvas);
+    });
+    drawStatic();
+  }
+
+  function drawStatic() {
+    if (reducedMotion) {
+      drawScene(1, 3);
+      drawScene(2, 5);
+      drawScene(3, 0);
+    }
+  }
+
+  window.addEventListener("resize", redrawAll);
+
+  if (reducedMotion) {
+    drawStatic();
+  } else {
+    var start = performance.now();
+    (function loop(now) {
+      var t = (now - start) / 1000;
+      drawScene(1, t);
+      drawScene(2, t * 0.7 + 4);
+      requestAnimationFrame(loop);
+    })(start);
+  }
+
+  /* ---------- confidence + last-seen jitter ---------- */
+
+  var confs = document.querySelectorAll("[data-conf]");
+  var seens = document.querySelectorAll("[data-seen]");
+  var seenCounts = [0, 3];
+
+  setInterval(function () {
+    confs.forEach(function (el, i) {
+      var base = i === 0 ? 0.88 : 0.80;
+      el.textContent = (base + Math.random() * 0.07).toFixed(2);
+    });
+    seenCounts = seenCounts.map(function (s) { return s >= 5 ? 0 : s + 1; });
+    seens.forEach(function (el, i) {
+      el.textContent = seenCounts[i] === 0
+        ? el.textContent.replace(/seen .*/, "seen just now")
+        : el.textContent.replace(/seen .*/, "seen " + seenCounts[i] + " s ago");
+    });
+  }, 1000);
+
+  /* ---------- load sequence: tiles connect in order ---------- */
+
+  var tiles = document.querySelectorAll(".tile");
+
+  function finishTile(tile, when) {
+    setTimeout(function () {
+      tile.classList.remove("connecting");
+      if (tile.dataset.cam === "03") return;
+      logEvent("CAM " + tile.dataset.cam + " link established, stream live");
+    }, when);
+  }
+
+  if (reducedMotion) {
+    tiles.forEach(function (t) { t.classList.remove("connecting"); });
+  } else {
+    finishTile(tiles[0], 700);
+    finishTile(tiles[1], 1400);
+    setTimeout(function () {
+      logEvent("CAM 03 has no signal, waiting for camera");
+    }, 2100);
+    setTimeout(function () {
+      logEvent("World state synced, 2 tracks shared to viewers");
+    }, 2600);
+  }
+
+  /* ---------- focus switching ---------- */
+
+  var areas = ["area-a", "area-b", "area-c"];
+
+  function setFocus(tile) {
+    tiles.forEach(function (t) { t.classList.remove("focused"); });
+    tile.classList.add("focused");
+    var order = [tile];
+    Array.prototype.forEach.call(tiles, function (t) {
+      if (t !== tile) order.push(t);
+    });
+    order.forEach(function (t, i) {
+      areas.forEach(function (a) { t.classList.remove(a); });
+      t.classList.add(areas[i]);
+    });
+    requestAnimationFrame(redrawAll);
+  }
+
+  tiles.forEach(function (tile) {
+    tile.addEventListener("click", function () { setFocus(tile); });
+  });
+
+  /* ---------- shared world state consumer ---------- */
+
+  var WORLD_URL = (function () {
+    var u = new URL(location.href);
+    var over = u.searchParams.get("server");
+    var base = over
+      ? over.replace(/\/$/, "").replace(/\/ws$/, "")
+      : u.protocol + "//" + u.host;
+    return base + "/world";
+  })();
+
+  var trackCanvases = {};
+  var trackCtxs = {};
+  var trackSizes = {};
+
+  function initOverlay() {
+    var overlays = document.querySelectorAll("canvas[data-overlay]");
+    overlays.forEach(function (c) {
+      var k = parseInt(c.dataset.overlay, 10);
+      var rect = c.parentElement.getBoundingClientRect();
+      c.width = Math.max(2, Math.round(rect.width * dpr));
+      c.height = Math.max(2, Math.round(rect.height * dpr));
+      trackCanvases[k] = c;
+      trackCtxs[k] = c.getContext("2d");
+      trackSizes[k] = { w: c.width, h: c.height };
+    });
+  }
+
+  initOverlay();
+  window.addEventListener("resize", function () {
+    initOverlay();
+    redrawAll();
+  });
+
+  var worldData = { cams: {}, tracks: [], t: 0, n_cams: 0 };
+  var netState = "connecting";
+  var netEl = document.querySelector("[data-net]");
+
+  function setNet(state, text) {
+    if (netEl) {
+      netEl.textContent = text || state;
+      netEl.className = "net" + (state === "bad" ? " bad" : "");
+    }
+    netState = state;
+  }
+
+  // live cameras sorted by name map onto tiles 1..3 in that order,
+  // so any camera name works and tiles follow what's actually connected
+  function camTileMap() {
+    var m = {};
+    Object.keys(worldData.cams).sort().slice(0, 3).forEach(function (n, i) {
+      m[n] = i + 1;
+    });
+    return m;
+  }
+
+  function drawTracks() {
+    if (reducedMotion && !worldData.tracks.length) return;
+    var tileOf = camTileMap();
+    Object.keys(trackCtxs).forEach(function (k) {
+      var ctx = trackCtxs[k];
+      var size = trackSizes[k];
+      if (!size) return;
+      ctx.clearRect(0, 0, size.w, size.h);
+      var ds = trackSizes[k];
+      var dprLocal = dpr;
+
+      worldData.tracks.forEach(function (trk) {
+        var cam = worldData.cams[trk.cam];
+        if (!cam || !cam.pose) return;
+        if (tileOf[trk.cam] !== parseInt(k, 10)) return;
+
+        var pose = cam.pose;
+        var dx = trk.x - pose.x;
+        var dy = trk.y - pose.y;
+        var dz = trk.z - pose.z;
+
+        var qx = pose.qx, qy = pose.qy, qz = pose.qz, qw = pose.qw;
+        var n = Math.sqrt(qx*qx + qy*qy + qz*qz + qw*qw);
+        if (n > 1e-9) { qx/=n; qy/=n; qz/=n; qw/=n; }
+        var localX = (1-2*(qy*qy+qz*qz))*dx + (2*(qx*qy-qz*qw))*dy + (2*(qx*qz+qy*qw))*dz;
+        var localY = (2*(qx*qy+qz*qw))*dx + (1-2*(qx*qx+qz*qz))*dy + (2*(qy*qz-qx*qw))*dz;
+        var localZ = (2*(qx*qz-qy*qw))*dx + (2*(qy*qz+qx*qw))*dy + (1-2*(qx*qx+qy*qy))*dz;
+
+        if (localZ <= 0.05) return;
+
+        var vw = ds.w, vh = ds.h;
+        var fx = (vh/2) / Math.tan(Math.PI * 65/360) * (vw/vh);
+        var fy = (vh/2) / Math.tan(Math.PI * 65/360);
+        var u = localX/localZ * fx + vw/2;
+        var v = localY/localZ * fy + vh/2;
+
+        if (u < -50 || u > vw+50 || v < -50 || v > vh+50) return;
+
+        var s = Math.max(8, Math.min(20, Math.round(1400 / Math.max(localZ, 0.3))));
+        var cxp = Math.round(u), cyp = Math.round(v);
+
+        ctx.strokeStyle = "rgba(255,59,48,0.95)";
+        ctx.lineWidth = Math.max(2, 1.6 * dprLocal);
+        ctx.beginPath();
+        ctx.moveTo(cxp - s, cyp - s); ctx.lineTo(cxp + s, cyp + s);
+        ctx.moveTo(cxp + s, cyp - s); ctx.lineTo(cxp - s, cyp + s);
+        ctx.stroke();
+
+        var label = trk.id + " ~" + localZ.toFixed(1) + "m";
+        ctx.font = (12 * dprLocal) + "px 'Chakra Petch',monospace";
+        var tw = ctx.measureText(label).width;
+        var bx = Math.max(4 * dprLocal, Math.min(cxp - tw/2 - 4 * dprLocal, vw - tw - 8 * dprLocal));
+        if (bx < 4 * dprLocal) bx = Math.max(4 * dprLocal, cxp + s + 2 * dprLocal);
+        ctx.fillStyle = "rgba(10,15,17,0.85)";
+        ctx.fillRect(bx, cyp - 14 * dprLocal - 2 * dprLocal, tw + 8 * dprLocal, 16 * dprLocal);
+        ctx.fillStyle = "#FFB020";
+        ctx.fillText(label, bx + 4 * dprLocal, cyp - 14 * dprLocal + 2 * dprLocal);
+      });
+    });
+  }
+
+  function applyWorld(data) {
+    if (!data || !data.tracks) return;
+    worldData = data;
+    if (netState === "connecting") {
+      setNet("live", data.n_cams ? (data.n_cams + " node(s)") : "live");
+    }
+    drawTracks();
+  }
+
+  function refreshWorld() {
+    if (netState === "bad") return;
+    fetch(WORLD_URL, { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("world HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        applyWorld(data);
+      })
+      .catch(function (e) {
+        if (netState === "live" || netState === "connecting") {
+          setNet("bad", "world offline");
+        }
+      });
+  }
+
+  refreshWorld();
+  setInterval(refreshWorld, 800);
+
+  // show which tiles have a live camera frame from the render loop
+  setInterval(function () {
+    var ids = [1, 2, 3];
+    ids.forEach(function (id) {
+      var dot = document.querySelector("[data-live=" + id + "]");
+      if (!dot) return;
+      if (worldData.n_cams > 0) {
+        dot.classList.add("on");
+      } else {
+        dot.classList.remove("on");
+      }
+    });
+    var c03 = document.querySelector("[data-cell=03-stat]");
+    if (c03) {
+      c03.textContent = worldData.n_cams > 0 ? "live" : "no signal";
+    }
+    var linktext = document.getElementById("linktext");
+    if (linktext) {
+      linktext.textContent = worldData.n_cams > 0 ? (worldData.n_cams + " of 3 live") : "waiting";
+    }
+  }, 600);
+
+})();
+</script>
+</body>
+</html>
